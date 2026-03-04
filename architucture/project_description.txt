@@ -1,0 +1,169 @@
+Intern Exercise: Async RAG Agent API (Ollama + LangGraph + Vector DB)
+Scope: FastAPI service that streams LLM responses asynchronously, uses a vector database for retrieval, and is orchestrated via LangGraph/LangChain. Includes tests, env configuration, and Dockerized deployment.
+
+1. Objectives
+●	Build a FastAPI backend that streams tokens asynchronously from an Ollama-hosted model.
+●	Implement Retrieval-Augmented Generation (RAG) using a vector database.
+●	Orchestrate retrieval and response synthesis with an agent implemented as a LangGraph state machine (LangChain tools).
+●	Provide unit tests (pytest) for critical modules and API behavior.
+●	Deliver a Docker-based setup (Dockerfile + docker-compose) with documented environment variables.
+●	Demonstrate engineering quality: observability, error handling, and secure configuration.
+2. Target Architecture
+The goal is a small but realistic production-like service. A typical request flow:
+1.	Client calls POST /chat (or /query) with {question, conversation_id, optional metadata}.
+2.	FastAPI validates the request, starts an async streaming response (Server-Sent Events or chunked streaming).
+3.	LangGraph agent runs: (a) query rewrite (optional), (b) vector retrieval, (c) tool calls if needed, (d) final answer synthesis.
+4.	The model is served by Ollama (local container or host).
+5.	Vector DB stores embeddings and documents; retrieval results are used to ground the answer.
+6.	Service returns a streamed answer plus optional citations and tracing metadata.
+Recommended components (choose any that fit)
+●	LLM runtime: Ollama (e.g., llama3, mistral, qwen2.5, etc.).
+●	Embeddings: Ollama embeddings (if available) or a local embedding model via LangChain.
+●	Vector DB: Chroma (easy), Qdrant, Weaviate, or PostgreSQL + pgvector.
+●	Tracing: OpenTelemetry (optional stretch) or structured JSON logs.
+●	Streaming: text/event-stream (SSE) recommended; WebSocket is an acceptable alternative.
+3. Functional Requirements
+3.1 API endpoints
+●	POST /ingest: ingest documents (text or files) into the vector store with metadata.
+●	POST /chat: accepts a user message and streams the agent response asynchronously.
+●	GET /health: liveness check (and optionally /ready for dependency readiness).
+●	Optional: GET /docs via OpenAPI (FastAPI default).
+3.2 Agent behavior (LangGraph)
+●	Use a LangGraph graph with explicit states and transitions (not a single chain).
+●	At minimum: Retrieve -> Synthesize. Prefer: Decide -> Retrieve -> Grounding check -> Synthesize.
+●	Return: answer text, list of sources (doc ids / titles), and the final retrieved snippets (or hashes).
+●	Avoid hallucinations: if retrieval is empty or irrelevant, respond with 'I don't know' and suggest what to ingest.
+3.3 Streaming constraints
+●	Must stream incrementally: do not buffer the entire final answer before returning.
+●	Include a final event/chunk that carries structured metadata (sources, latency, token counts if available).
+●	Handle client disconnects gracefully (cancel tasks, avoid leaking background coroutines).
+4. Non-Functional Requirements
+●	Config via environment variables (12-factor style). No hardcoded secrets or endpoints.
+●	Dockerized build that runs locally with one command (docker compose up).
+●	Reasonable error handling: timeouts, Ollama down, vector DB down, invalid payloads.
+●	Basic observability: structured logs with request id / conversation id; include latency metrics.
+5. Environment Variables
+Define these in a .env file (do not commit secrets). Suggested set:
+# Service
+APP_ENV=dev
+APP_HOST=0.0.0.0
+APP_PORT=8000
+LOG_LEVEL=INFO
+
+# Ollama
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_MODEL=llama3
+OLLAMA_EMBED_MODEL=nomic-embed-text  # example; use what you have
+
+# Vector DB (example: Chroma)
+VECTOR_DB=chroma
+CHROMA_HOST=chroma
+CHROMA_PORT=8000
+CHROMA_COLLECTION=docs
+
+# Retrieval
+TOP_K=4
+MAX_CONTEXT_CHARS=12000
+
+# Timeouts
+OLLAMA_TIMEOUT_S=60
+RETRIEVAL_TIMEOUT_S=10
+6. Docker Deliverables
+●	Dockerfile for the FastAPI service (multi-stage recommended).
+●	docker-compose.yml spinning up: api, ollama, and the vector DB (or postgres+pgvector).
+●	Volume mounts for persisted vector DB storage and optionally Ollama models.
+●	Health checks in compose (where supported).
+Example docker-compose expectations (conceptual)
+Your compose should allow: docker compose up -> service ready -> /health OK -> ingest -> chat streaming.
+7. Testing Requirements (pytest)
+●	Unit tests for: (a) retrieval module, (b) graph transitions, (c) API request validation, (d) streaming behavior (at least one test).
+●	Mock Ollama calls (do not require actual model to run unit tests).
+●	If you add integration tests, keep them separate (e.g., marker 'integration') and optional in CI.
+●	Use testcontainers only as a stretch; prefer in-memory vector store mocks for unit tests.
+Suggested test cases
+●	Empty retrieval -> agent returns 'I don't know' path.
+●	Retrieval returns N docs -> agent includes citations list in final metadata.
+●	Ollama timeout -> API returns 504-like error or a streamed error event.
+●	Streaming: first chunk emitted quickly (<X ms) when model starts producing.
+8. Repo Layout (Suggested)
+app/
+  main.py                 # FastAPI entrypoint
+  api/
+    routes_chat.py
+    routes_ingest.py
+    schemas.py
+  agent/
+    graph.py               # LangGraph definition
+    nodes.py               # retrieve, synthesize, guardrails
+    state.py               # typed state
+  rag/
+    vectorstore.py         # wrapper around vector db
+    embeddings.py
+    ingest.py
+  core/
+    config.py              # env parsing (pydantic-settings)
+    logging.py
+tests/
+  test_routes_chat.py
+  test_retrieval.py
+  test_graph.py
+  conftest.py
+Dockerfile
+docker-compose.yml
+.env.example
+pyproject.toml (or requirements.txt)
+9. Acceptance Criteria
+●	End-to-end: with compose running, you can ingest a sample doc set and query it; responses stream.
+●	Responses are grounded: they reference retrieved content and include sources.
+●	pytest passes locally (unit tests run without Ollama).
+●	Clean configuration via .env and .env.example included.
+●	README explains setup, commands, and known limitations.
+10. Extra Challenges (Add-ons)
+Pick at least 3. Prioritize engineering depth over breadth.
+10.1 Reliability & correctness
+●	Circuit breaker / retry policy for Ollama (bounded retries, jitter).
+●	Request-scoped cancellation: abort agent run if client disconnects; verify with a test.
+●	Deterministic prompting: enforce a response schema (pydantic output parser) and test parsing failures.
+●	Grounding verifier node: if answer contains claims not supported by retrieved docs, force a 'cannot answer' response.
+10.2 Agentic tooling & LangGraph depth
+●	Add a decision node that chooses between: direct answer (no retrieval) vs RAG vs clarification question.
+●	Implement a tool node for 'lookup_by_id' that fetches a full document by id and re-ranks.
+●	Add memory: store conversation summaries in the vector DB and retrieve them for context (with safeguards).
+●	Add an evaluation node that scores retrieval relevance and logs it.
+10.3 Retrieval quality
+●	Hybrid retrieval: combine dense vectors + keyword BM25; fuse results (RRF).
+●	Chunking strategy: implement document chunking with overlap; expose chunk size via env vars.
+●	Metadata filtering: allow user to pass filters (e.g., tag=policy) and restrict retrieval accordingly.
+●	Re-ranking: optional cross-encoder re-ranker (local) or heuristic scoring.
+10.4 Observability & operations
+●	OpenTelemetry traces: propagate trace id from request to agent nodes; export to stdout collector.
+●	Prometheus metrics endpoint: request count, latency histograms, retrieval hit rate.
+●	Structured logging: JSON logs with fields: request_id, conv_id, node, latency_ms.
+●	Readiness endpoint checks Ollama + vector DB connectivity.
+10.5 Security & safety
+●	Prompt-injection defenses: treat retrieved text as untrusted; add a 'sanitize context' node.
+●	Rate limiting (per IP / per API key) and tests for limit exceeded.
+●	Secrets hygiene: forbid committing .env; add pre-commit hook (stretch).
+●	PII redaction: optional node that removes emails/phones from context before prompting.
+10.6 Developer experience
+●	Makefile with common commands: lint, test, format, compose-up.
+●	Pre-commit config (ruff/black/isort) + CI workflow (GitHub Actions).
+●	Typed Python: mypy + type-safe LangGraph state definitions.
+●	Contract tests for schemas (pydantic) and OpenAPI snapshot testing.
+11. Evaluation Rubric (Suggested)
+Category	What we look for	Weight
+Architecture	Clear separation of API, agent graph, retrieval, config; minimal coupling.	25%
+Correctness	Grounded answers, robust error handling, deterministic behavior where possible.	25%
+Tests	High-signal unit tests, mocking strategy, good coverage of edge cases.	20%
+Ops / Docker	One-command local run, sensible defaults, env-driven config, health checks.	15%
+Code quality	Typing, linting, readability, docs; clean Git hygiene.	15%
+12. Suggested Timeline
+●	Day 1: skeleton project, FastAPI endpoints, config, basic docker-compose.
+●	Day 2: vector DB + ingestion + retrieval module with tests.
+●	Day 3: LangGraph agent + streaming endpoint; add mocks; stabilize.
+●	Day 4: polish: logging, health/readiness, extra challenge(s), README.
+13. Submission Checklist
+●	README with setup steps and example curl commands for ingest + chat.
+●	docker-compose.yml + Dockerfile + .env.example.
+●	pytest suite passing; include how to run integration tests (if any).
+●	Short design note: why you chose your vector DB, streaming method, and graph states.

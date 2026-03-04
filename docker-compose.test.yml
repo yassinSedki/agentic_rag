@@ -1,0 +1,57 @@
+# docker-compose.test.yml — Test environment
+# Uses in-memory backends and mock services where possible.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   pytest tests/ -m integration -v
+#   docker compose -f docker-compose.test.yml down
+
+version: "3.9"
+
+services:
+  # ── Test API ─────────────────────────────────────────────────────────
+  api-test:
+    build: .
+    container_name: rag-api-test
+    ports:
+      - "8100:8000"
+    environment:
+      - APP_ENV=dev
+      - OLLAMA_BASE_URL=http://ollama-test:11434
+      - CHROMA_HOST=chroma-test
+      - CHROMA_PORT=8000
+      - CHROMA_COLLECTION=test_docs
+      - API_KEY=test-key
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      chroma-test:
+        condition: service_healthy
+    networks:
+      - test_net
+
+  # ── ChromaDB (ephemeral — no persistent volume) ─────────────────────
+  chroma-test:
+    image: chromadb/chroma:latest
+    container_name: rag-chroma-test
+    environment:
+      - IS_PERSISTENT=FALSE
+      - ANONYMIZED_TELEMETRY=FALSE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - test_net
+
+  # ── Ollama (optional for integration tests) ─────────────────────────
+  ollama-test:
+    image: ollama/ollama:latest
+    container_name: rag-ollama-test
+    networks:
+      - test_net
+
+networks:
+  test_net:
+    driver: bridge
