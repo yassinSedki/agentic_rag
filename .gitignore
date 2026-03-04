@@ -40,3 +40,6 @@ docker-data/
 # Chroma / vector store data (if created locally)
 chroma/
 
+# Ignored project folders
+architucture/
+helpers/
