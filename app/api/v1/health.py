@@ -11,7 +11,7 @@ import structlog
 from fastapi import APIRouter
 
 from app.core.config import get_settings
-from app.vectorstore.chroma import ChromaAdapter
+from app.vectorstore import VectorStore
 
 logger = structlog.get_logger()
 
@@ -44,7 +44,7 @@ async def ready() -> dict:
 
     # Check ChromaDB
     try:
-        adapter = ChromaAdapter()
+        adapter = VectorStore()
         is_healthy = await adapter.health_check()
         statuses["vectordb"] = "up" if is_healthy else "down"
     except Exception:

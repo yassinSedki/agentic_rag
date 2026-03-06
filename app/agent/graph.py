@@ -1,15 +1,15 @@
-"""LangGraph state machine — wires all nodes and conditional edges.
+"""LangGraph state machine — wires nodes and conditional edges.
 
-Graph flow (updated — grounding AFTER synthesis):
+This graph orchestrates routing and retrieval, then **prepares** a generation
+prompt. The actual LLM token streaming happens in the API layer.
+
+Graph flow (streaming-ready):
     START → Decide
         ├─ route=rag     → QueryRewrite → Retrieve → Evaluate
-        │                     ├─ sufficient=True  → Synthesize → GroundingCheck
-        │                     │                         ├─ ok=True  → Validate → Stream
-        │                     │                         └─ ok=False → NoAnswer → Stream
-        │                     └─ sufficient=False → NoAnswer → Stream
-        ├─ route=direct  → DirectAnswer → Stream
-        └─ route=clarify → Clarify → Stream
-    Stream → END
+        │                     ├─ sufficient=True  → PrepareRagGeneration → END
+        │                     └─ sufficient=False → NoAnswer → END
+        ├─ route=direct  → PrepareDirectGeneration → END
+        └─ route=clarify → PrepareClarifyGeneration → END
 """
 
 from __future__ import annotations
@@ -17,18 +17,19 @@ from __future__ import annotations
 import structlog
 from langgraph.graph import END, StateGraph
 
-from app.agent.nodes.clarify import clarify
 from app.agent.nodes.decide import decide
-from app.agent.nodes.direct_answer import direct_answer
 from app.agent.nodes.evaluate_relevance import evaluate_relevance
-from app.agent.nodes.grounding_check import grounding_check
 from app.agent.nodes.no_answer import no_answer
+from app.agent.nodes.prepare_generation import (
+    prepare_clarify_generation,
+    prepare_direct_generation,
+    prepare_rag_generation,
+)
 from app.agent.nodes.query_rewrite import query_rewrite
-from app.agent.nodes.retrieve import retrieve
-from app.agent.nodes.stream_answer import stream_answer
-from app.agent.nodes.synthesize import synthesize
-from app.agent.nodes.validate_output import validate_output
+from app.agent.nodes.retrieve import retrieve, set_vector_store as set_retrieve_vector_store
 from app.agent.state import AgentState
+from app.agent.tools.lookup_by_id import set_vector_store as set_lookup_vector_store
+from app.vectorstore import VectorStore
 
 logger = structlog.get_logger()
 
@@ -80,18 +81,21 @@ def build_graph() -> StateGraph:
     """
     graph = StateGraph(AgentState)
 
+    # Wire shared vector store into retrieval-related components once per graph
+    vs = VectorStore()
+    set_retrieve_vector_store(vs)
+    set_lookup_vector_store(vs)
+
     # ── Register nodes ───────────────────────────────────────────────────
     graph.add_node("decide", decide)
     graph.add_node("query_rewrite", query_rewrite)
     graph.add_node("retrieve", retrieve)
     graph.add_node("evaluate_relevance", evaluate_relevance)
-    graph.add_node("synthesize", synthesize)
-    graph.add_node("grounding_check", grounding_check)
-    graph.add_node("validate_output", validate_output)
-    graph.add_node("direct_answer", direct_answer)
-    graph.add_node("clarify", clarify)
+    # Streaming generation is done in the API layer; these nodes prepare prompts.
+    graph.add_node("synthesize", prepare_rag_generation)
+    graph.add_node("direct_answer", prepare_direct_generation)
+    graph.add_node("clarify", prepare_clarify_generation)
     graph.add_node("no_answer", no_answer)
-    graph.add_node("stream_answer", stream_answer)
 
     # ── Entry point ──────────────────────────────────────────────────────
     graph.set_entry_point("decide")
@@ -115,37 +119,16 @@ def build_graph() -> StateGraph:
         "evaluate_relevance",
         after_evaluate,
         {
-            "synthesize": "synthesize",
-            "no_answer": "no_answer",
-        },
-    )
-
-    # Synthesis → Grounding (grounding AFTER synthesis)
-    graph.add_edge("synthesize", "grounding_check")
-
-    graph.add_conditional_edges(
-        "grounding_check",
-        after_grounding,
-        {
-            "validate_output": "validate_output",
-            "no_answer": "no_answer",
-        },
-    )
-
-    graph.add_conditional_edges(
-        "validate_output",
-        after_validate,
-        {
-            "stream_answer": "stream_answer",
+            "synthesize": "synthesize",  # prepare_rag_generation
             "no_answer": "no_answer",
         },
     )
 
     # ── Terminal edges ───────────────────────────────────────────────────
-    graph.add_edge("direct_answer", "stream_answer")
-    graph.add_edge("clarify", "stream_answer")
-    graph.add_edge("no_answer", "stream_answer")
-    graph.add_edge("stream_answer", END)
+    graph.add_edge("synthesize", END)
+    graph.add_edge("direct_answer", END)
+    graph.add_edge("clarify", END)
+    graph.add_edge("no_answer", END)
 
     logger.info("agent_graph_built")
     return graph.compile()

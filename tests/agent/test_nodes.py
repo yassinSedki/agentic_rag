@@ -6,10 +6,72 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.agent.nodes.decide import decide
 from app.agent.nodes.evaluate_relevance import evaluate_relevance
 from app.agent.nodes.no_answer import no_answer
-from app.agent.nodes.stream_answer import stream_answer
-from app.agent.nodes.validate_output import validate_output
+from app.agent.nodes.query_rewrite import query_rewrite
+from app.agent.nodes.prepare_generation import (
+    prepare_rag_generation,
+    prepare_direct_generation,
+    prepare_clarify_generation,
+)
+
+
+class TestDecide:
+    """Tests for the decide node."""
+
+    @pytest.mark.asyncio
+    async def test_decide_rag(self):
+        class FakeResponse:
+            content = "rag"
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=FakeResponse())
+
+        with patch("app.agent.nodes.decide.get_chat_llm", return_value=mock_llm):
+            state = {"question": "What is RAG?"}
+            result = await decide(state)
+            assert result["route"] == "rag"
+
+    @pytest.mark.asyncio
+    async def test_decide_fallback(self):
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=Exception("error"))
+
+        with patch("app.agent.nodes.decide.get_chat_llm", return_value=mock_llm):
+            state = {"question": "..."}
+            result = await decide(state)
+            assert result["route"] == "rag"  # default fallback
+
+
+class TestQueryRewrite:
+    """Tests for the query_rewrite node."""
+
+    @pytest.mark.asyncio
+    async def test_rewrite_success(self):
+        class FakeResponse:
+            content = "Detailed search query about RAG"
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=FakeResponse())
+
+        with patch("app.agent.nodes.query_rewrite.get_chat_llm", return_value=mock_llm):
+            state = {"question": "tell me about rag"}
+            result = await query_rewrite(state)
+            assert "Detailed" in result["rewritten_query"]
+
+    @pytest.mark.asyncio
+    async def test_rewrite_short_fallback(self):
+        class FakeResponse:
+            content = "hi"  # too short
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(return_value=FakeResponse())
+
+        with patch("app.agent.nodes.query_rewrite.get_chat_llm", return_value=mock_llm):
+            state = {"question": "original question"}
+            result = await query_rewrite(state)
+            assert result["rewritten_query"] == "original question"
 
 
 class TestEvaluateRelevance:
@@ -36,21 +98,32 @@ class TestEvaluateRelevance:
         assert result["retrieval_score"] > 0.0
 
 
-class TestValidateOutput:
-    """Tests for the validate_output node."""
+class TestPrepareGeneration:
+    """Tests for nodes that build prompts for the API layer."""
 
     @pytest.mark.asyncio
-    async def test_valid_answer(self):
-        state = {"raw_answer": "This is the answer.", "source_ids": ["doc-1"]}
-        result = await validate_output(state)
-        assert result["final_answer"] == "This is the answer."
-        assert result["error"] is None
+    async def test_prepare_rag(self):
+        state = {
+            "question": "test?",
+            "retrieved_docs": [{"doc_id": "doc1", "content": "Sample content"}],
+        }
+        result = await prepare_rag_generation(state)
+        assert "doc1" in result["generation_prompt"]
+        assert "Sample content" in result["generation_prompt"]
+        assert result["source_ids"] == ["doc1"]
 
     @pytest.mark.asyncio
-    async def test_empty_answer(self):
-        state = {"raw_answer": "", "source_ids": []}
-        result = await validate_output(state)
-        assert result["error"] is not None
+    async def test_prepare_direct(self):
+        state = {"question": "Hello"}
+        result = await prepare_direct_generation(state)
+        assert "Hello" in result["generation_prompt"]
+        assert result["source_ids"] == []
+
+    @pytest.mark.asyncio
+    async def test_prepare_clarify(self):
+        state = {"question": "what?"}
+        result = await prepare_clarify_generation(state)
+        assert "what?" in result["generation_prompt"]
 
 
 class TestNoAnswer:
@@ -64,30 +137,4 @@ class TestNoAnswer:
         }
         result = await no_answer(state)
         assert "don't have enough information" in result["final_answer"]
-
-    @pytest.mark.asyncio
-    async def test_grounding_failed(self):
-        state = {
-            "question": "test?",
-            "retrieval_sufficient": True,
-            "grounding_ok": False,
-        }
-        result = await no_answer(state)
-        assert "verified" in result["final_answer"]
-
-
-class TestStreamAnswer:
-    """Tests for the stream_answer node."""
-
-    @pytest.mark.asyncio
-    async def test_prepares_payload(self):
-        state = {
-            "final_answer": "Hello world",
-            "source_ids": ["doc-1"],
-            "metadata": {},
-            "retrieval_score": 0.85,
-        }
-        result = await stream_answer(state)
-        assert result["final_answer"] == "Hello world"
-        assert result["metadata"]["source_ids"] == ["doc-1"]
-        assert result["metadata"]["retrieval_score"] == 0.85
+        assert "Hint:" in result["final_answer"]

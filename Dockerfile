@@ -36,8 +36,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY app/ ./app/
 
-# Set ownership
-RUN chown -R appuser:appgroup /app
+# Create data directory for persistence
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data
 
 USER appuser
 

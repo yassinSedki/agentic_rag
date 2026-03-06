@@ -1,26 +1,24 @@
-"""Ingest endpoint — accept documents and push into the vector store.
+"""Ingest endpoint — accept uploaded files and push into the vector store.
 
-POST /ingest accepts raw text, file content (base64), or references
-and delegates to the ``DocumentProcessor`` pipeline.
+POST /ingest accepts a file upload and delegates to the
+``DocumentProcessor`` pipeline. Metadata such as filename and page
+number are derived automatically.
 """
 
 from __future__ import annotations
 
-import base64
 import tempfile
-import uuid
 from pathlib import Path
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 
-from app.api.v1.models.ingest import IngestRequest, IngestResponse
+from app.api.v1.models.ingest import IngestResponse
 from app.core.config import get_settings
 from app.core.exceptions import IngestError
 from app.core.metrics import REQUEST_COUNT
-from app.core.security import verify_api_key
 from app.ingest.document_processor import DocumentProcessor
-from app.vectorstore.chroma import ChromaAdapter
+from app.vectorstore import VectorStore
 
 logger = structlog.get_logger()
 
@@ -29,51 +27,45 @@ router = APIRouter()
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest(
-    body: IngestRequest,
-    api_key: str = Depends(verify_api_key),
+    file: UploadFile = File(...),
 ) -> IngestResponse:
-    """Ingest a document into the knowledge base.
+    """Ingest a document via direct file upload.
 
-    Accepts raw text, base64-encoded file content, or both.
+    The client uploads a single file (PDF, TXT, MD, DOCX). The system
+    derives metadata automatically:
+
+    - ``source``: original filename.
+    - ``page``: for PDFs, each page becomes a separate ``Document`` with
+      its own page number.
+
+    No user-supplied metadata is required; each resulting chunk carries
+    the filename and (where applicable) page number in its metadata.
     """
     logger.info(
-        "ingest_request",
-        filename=body.filename,
-        has_text=body.text is not None,
-        has_base64=body.content_base64 is not None,
+        "ingest_file_request",
+        filename=file.filename,
+        content_type=file.content_type,
     )
 
     try:
-        vector_store = ChromaAdapter()
+        vector_store = VectorStore()
         processor = DocumentProcessor(vector_store)
 
-        if body.content_base64:
-            # Decode base64 content and write to temp file
-            decoded = base64.b64decode(body.content_base64)
-            suffix = Path(body.filename).suffix if body.filename else ".txt"
+        # Persist uploaded content to a temporary file, preserving suffix
+        suffix = Path(file.filename or "upload").suffix or ".txt"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
 
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=suffix
-            ) as tmp:
-                tmp.write(decoded)
-                tmp_path = tmp.name
-
+        try:
             result = await processor.process(
                 source=tmp_path,
-                filename=body.filename,
-                metadata=body.metadata,
+                filename=file.filename,
+                metadata=None,
             )
-            # Clean up temp file
+        finally:
             Path(tmp_path).unlink(missing_ok=True)
-
-        elif body.text:
-            result = await processor.process(
-                source=body.text,
-                filename=body.filename or "raw_text",
-                metadata=body.metadata,
-            )
-        else:
-            raise IngestError("Either 'text' or 'content_base64' must be provided.")
 
         REQUEST_COUNT.labels(endpoint="/ingest", status="success").inc()
 
@@ -86,6 +78,6 @@ async def ingest(
     except IngestError:
         raise
     except Exception as exc:
-        logger.error("ingest_failed", error=str(exc))
+        logger.error("ingest_file_failed", error=str(exc))
         REQUEST_COUNT.labels(endpoint="/ingest", status="error").inc()
         raise IngestError(f"Ingestion failed: {exc}") from exc

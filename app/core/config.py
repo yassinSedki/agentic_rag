@@ -29,16 +29,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ── LLM (Ollama) ────────────────────────────────────────────────────
-    ollama_base_url: str = "http://ollama:11434"
+    ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_model: str = "llama3"
     ollama_embed_model: str = "nomic-embed-text"
     ollama_timeout_s: int = 60
 
     # ── Vector Database ──────────────────────────────────────────────────
     vector_db: Literal["chroma", "qdrant"] = "chroma"
-    chroma_host: str = "chroma"
-    chroma_port: int = 8001
-    chroma_collection: str = "docs"
+    chroma_persistence_path: str = "./data/chroma_db"
 
     # ── Retrieval ────────────────────────────────────────────────────────
     top_k: int = 4
@@ -50,7 +48,6 @@ class Settings(BaseSettings):
     chunk_overlap: int = 64
 
     # ── Security ─────────────────────────────────────────────────────────
-    api_key: str = "changeme"
     rate_limit: str = "60/minute"
 
     # ── Observability ────────────────────────────────────────────────────
@@ -62,7 +59,7 @@ class Settings(BaseSettings):
     circuit_breaker_reset_s: int = 30
 
     # ── Feature Flags ────────────────────────────────────────────────────
-    enable_memory: bool = False  # Memory integration deferred to later phase
+    enable_memory: bool = True  # Memory integration enabled
 
 
 @lru_cache(maxsize=1)

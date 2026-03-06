@@ -1,7 +1,7 @@
 """ChromaDB adapter implementing ``VectorStoreAdapter``.
 
-Uses the ChromaDB ``HttpClient`` to communicate with a running Chroma
-server.  All calls are wrapped with the circuit breaker for resilience.
+Uses the ChromaDB ``PersistentClient`` for local, embedded vector storage.
+All calls are wrapped with the circuit breaker for resilience.
 """
 
 from __future__ import annotations
@@ -25,9 +25,8 @@ class ChromaAdapter(VectorStoreAdapter):
 
     def __init__(self) -> None:
         settings = get_settings()
-        self._client = chromadb.HttpClient(
-            host=settings.chroma_host,
-            port=settings.chroma_port,
+        self._client = chromadb.PersistentClient(
+            path=settings.chroma_persistence_path,
         )
         self._collection_name = settings.chroma_collection
         self._collection = self._client.get_or_create_collection(
@@ -35,9 +34,8 @@ class ChromaAdapter(VectorStoreAdapter):
             metadata={"hnsw:space": "cosine"},
         )
         logger.info(
-            "chroma_adapter_initialized",
-            host=settings.chroma_host,
-            port=settings.chroma_port,
+            "chroma_adapter_initialized_embedded",
+            path=settings.chroma_persistence_path,
             collection=self._collection_name,
         )
 

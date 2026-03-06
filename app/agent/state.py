@@ -36,6 +36,9 @@ class AgentState(TypedDict, total=False):
         Whether the retrieved docs are relevant enough.
     raw_answer : str
         Draft answer produced by the synthesize step.
+    generation_prompt : str
+        Prompt to be sent to the LLM for streaming generation. When this is set,
+        the API layer is responsible for streaming the model output.
     final_answer : str
         Final validated answer ready for streaming.
     source_ids : list[str]
@@ -61,6 +64,7 @@ class AgentState(TypedDict, total=False):
     retrieval_sufficient: bool
 
     raw_answer: str
+    generation_prompt: str
     final_answer: str
     source_ids: list[str]
 

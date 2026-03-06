@@ -9,8 +9,6 @@ import re
 from typing import Optional
 
 import structlog
-from fastapi import Request, Security
-from fastapi.security import APIKeyHeader
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
 
@@ -19,18 +17,7 @@ from app.core.exceptions import AuthenticationError
 
 logger = structlog.get_logger()
 
-# ── API Key Validation ───────────────────────────────────────────────────────
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-
-async def verify_api_key(
-    api_key: Optional[str] = Security(_api_key_header),
-) -> str:
-    """FastAPI dependency that validates the ``X-API-Key`` header."""
-    settings = get_settings()
-    if api_key is None or api_key != settings.api_key:
-        raise AuthenticationError("Invalid or missing API key")
-    return api_key
 
 
 # ── Prompt Injection Sanitizer ───────────────────────────────────────────────
