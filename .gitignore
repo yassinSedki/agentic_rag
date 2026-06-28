@@ -8,7 +8,10 @@ env/
 venv/
 .venv/
 
-# Poetry
+# Poetry / package management
+poetry.lock
+
+# Test / lint caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -21,7 +24,7 @@ build/
 dist/
 *.egg-info/
 
-# Environment files
+# Environment files (never commit secrets)
 .env
 .env.local
 .env.*.local
@@ -33,13 +36,20 @@ dist/
 *.swo
 *.DS_Store
 
-# Docker
+# Claude Code — personal settings override (project settings.json is fine to commit)
+.claude/settings.local.json
+
+# Docker runtime
 *.log
 docker-data/
 
-# Chroma / vector store data (if created locally)
+# Runtime data — vector store and conversation memory
+# (created at runtime; paths match defaults in config.py)
+data/
+chroma_db/
 chroma/
-
+*.db
+.claude/
 # Ignored project folders
 architucture/
 helpers/
