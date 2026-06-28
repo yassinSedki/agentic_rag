@@ -17,7 +17,7 @@ import structlog
 from fastapi import APIRouter, Request
 from sse_starlette.sse import EventSourceResponse
 
-from app.agent.graph import build_graph
+from app.agent.graph import get_graph
 from app.api.v1.models.chat import (
     ChatDoneEvent,
     ChatErrorEvent,
@@ -109,8 +109,8 @@ async def _stream_response(
 
     ACTIVE_CONNECTIONS.inc()
     try:
-        # Build and run graph (routing + retrieval + prompt preparation)
-        graph = build_graph()
+        # Get the cached compiled graph (built once at startup)
+        graph = get_graph()
 
         # Load history from memory store if not provided by client
         history = request.history

@@ -14,6 +14,8 @@ Graph flow (streaming-ready):
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import structlog
 from langgraph.graph import END, StateGraph
 
@@ -51,20 +53,6 @@ def after_evaluate(state: AgentState) -> str:
     """Route after EvaluateRelevance based on ``state.retrieval_sufficient``."""
     if state.get("retrieval_sufficient", False):
         return "synthesize"
-    return "no_answer"
-
-
-def after_grounding(state: AgentState) -> str:
-    """Route after GroundingCheck based on ``state.grounding_ok``."""
-    if state.get("grounding_ok", False):
-        return "validate_output"
-    return "no_answer"
-
-
-def after_validate(state: AgentState) -> str:
-    """Route after ValidateOutput based on ``state.error``."""
-    if state.get("error") is None:
-        return "stream_answer"
     return "no_answer"
 
 
@@ -132,3 +120,9 @@ def build_graph() -> StateGraph:
 
     logger.info("agent_graph_built")
     return graph.compile()
+
+
+@lru_cache(maxsize=1)
+def get_graph() -> StateGraph:
+    """Return the compiled graph, building it once and caching it for all requests."""
+    return build_graph()
