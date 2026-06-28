@@ -21,7 +21,7 @@ logger = structlog.get_logger()
 
 
 class ChromaAdapter(VectorStoreAdapter):
-    """Concrete vector store backed by **ChromaDB** over HTTP."""
+    """Concrete vector store backed by an embedded **ChromaDB** PersistentClient."""
 
     def __init__(self) -> None:
         settings = get_settings()

@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # ── Vector Database ──────────────────────────────────────────────────
     vector_db: Literal["chroma", "qdrant"] = "chroma"
     chroma_persistence_path: str = "./data/chroma_db"
+    chroma_collection: str = "docs"
 
     # ── Retrieval ────────────────────────────────────────────────────────
     top_k: int = 4
