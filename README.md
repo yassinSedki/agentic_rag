@@ -87,7 +87,7 @@ Nodes only *prepare* prompts — the API layer does the actual LLM streaming. Th
 flowchart LR
     Q[User Query] --> Dense[Dense Search\nOllama embedding + ChromaDB]
     Q --> BM[BM25 Keyword Search]
-    Dense --> RRF[Reciprocal Rank Fusion\nscore = Σ 1/(k + rank), k=60]
+    Dense --> RRF["Reciprocal Rank Fusion (k=60)"]
     BM --> RRF
     RRF --> TopK[Top-K Chunks] --> Prompt[Grounded Prompt]
 ```
